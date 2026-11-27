@@ -38,7 +38,9 @@ ALLOWED=(Read Edit Write Grep Glob Agent
   'Bash(terraform plan:*)' 'Bash(terraform output:*)' 'Bash(terraform -chdir=*)'
   'Bash(aws sts:*)' 'Bash(aws ecs:*)' 'Bash(aws elbv2:*)' 'Bash(aws logs:*)'
   'Bash(aws ecr describe-*:*)' 'Bash(curl:*)' 'Bash(scripts/verify-deploy.sh:*)'
-  'Bash(cat:*)' 'Bash(ls:*)' 'Bash(grep:*)' 'Bash(sed:*)' 'Bash(jq:*)')
+  'Bash(cat:*)' 'Bash(ls:*)' 'Bash(grep:*)' 'Bash(sed:*)' 'Bash(jq:*)'
+  'Bash(cd:*)' 'Bash(echo:*)' 'Bash(mkdir:*)' 'Bash(sleep:*)' 'Bash(test:*)'
+  'Bash(head:*)' 'Bash(tail:*)' 'Bash(aws ec2 describe-*:*)' 'Bash(aws iam get-*:*)')
 DISALLOWED=('Bash(terraform destroy:*)' 'Bash(git push --force:*)'
   'Bash(gh repo delete:*)' 'Bash(aws iam create-access-key:*)')
 if [ "$MODE" = plan ]; then
