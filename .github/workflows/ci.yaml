@@ -1,13 +1,15 @@
 name: CI Pipeline
 
 on:
-  push:
-    branches:
-      - main
-      - 'feature-*'
   pull_request:
     branches:
+      - devel
+      - stage
       - main
+  push:
+    branches:
+      - 'feature/**'
+      - 'bugfix/**'
 
 jobs:
   install:
