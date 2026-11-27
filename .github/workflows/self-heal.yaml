@@ -1,0 +1,62 @@
+name: Self-Heal CI
+
+# When the CI Pipeline fails on a feature/ or bugfix/ branch, an AI agent
+# (Claude Code, using .claude/agents/ci-doctor.md) diagnoses the failed logs,
+# pushes a fix commit to the same branch and comments the diagnosis on the PR.
+on:
+  workflow_run:
+    workflows: ['CI Pipeline']
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+  id-token: write
+
+concurrency:
+  group: self-heal-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  heal:
+    # Guardrails: only failed runs, only same-repo work branches (never devel/stage/main
+    # or forks), and stop after 3 consecutive agent commits to avoid fix loops.
+    if: >
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      (startsWith(github.event.workflow_run.head_branch, 'feature/') ||
+       startsWith(github.event.workflow_run.head_branch, 'bugfix/'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
+          fetch-depth: 10
+
+      - name: Loop guard (max 3 agent commits in a row)
+        id: guard
+        run: |
+          N=$(git log -3 --format=%an | grep -c 'claude\[bot\]' || true)
+          echo "agent_commits=$N" >> "$GITHUB_OUTPUT"
+          [ "$N" -lt 3 ] || echo "::warning::Self-heal limit reached; human needed"
+
+      - uses: actions/setup-node@v4
+        if: steps.guard.outputs.agent_commits < 3
+        with: { node-version-file: '.nvmrc' }
+
+      - uses: anthropics/claude-code-action@v1
+        if: steps.guard.outputs.agent_commits < 3
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          claude_args: '--max-turns 30 --allowedTools Bash,Read,Edit,Write,Grep,Glob'
+          prompt: |
+            Act as the ci-doctor agent defined in .claude/agents/ci-doctor.md.
+            Failed run: ${{ github.event.workflow_run.html_url }} (id ${{ github.event.workflow_run.id }})
+            Branch: ${{ github.event.workflow_run.head_branch }}
+            Diagnose with `gh run view ${{ github.event.workflow_run.id }} --log-failed`,
+            fix the root cause, validate locally, commit and push to this branch.
+            Then comment on the open PR for this branch with: failing step, root cause, fix.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -15,11 +15,11 @@ on:
 permissions:
   contents: read
 
-# Cancel superseded runs for the same branch / PR
 # Build-time config for the React app (non-secret; override with a repo variable)
 env:
   REACT_APP_API_URL: ${{ vars.REACT_APP_API_URL || 'http://localhost:8080' }}
 
+# Cancel superseded runs for the same branch / PR
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true

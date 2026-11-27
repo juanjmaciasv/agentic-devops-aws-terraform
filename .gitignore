@@ -22,3 +22,14 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+
+# agent transcripts (included in the submission zip, not in git)
+.chat-history/
+agent/RUN_REPORT.md
