@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(terraform destroy:*)",
+      "Bash(terraform -chdir=* destroy:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push origin devel:*)",
+      "Bash(git push origin stage:*)",
+      "Bash(git push origin main:*)",
+      "Bash(gh repo delete:*)",
+      "Bash(aws iam create-access-key:*)",
+      "Bash(rm -rf /:*)",
+      "Read(./**/*.tfstate)",
+      "Read(~/.aws/credentials)"
+    ]
+  }
+}

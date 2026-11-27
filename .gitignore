@@ -29,3 +29,7 @@ yarn-error.log*
 *.tfstate.*
 *.tfplan
 crash.log
+
+# agent transcripts (included in the submission zip, not in git)
+.chat-history/
+agent/RUN_REPORT.md
