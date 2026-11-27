@@ -69,6 +69,8 @@ claude -p "Use the devops-orchestrator agent. Execute agent/instructions.md end 
   --max-turns "${MAX_TURNS:-200}" \
   --output-format stream-json --verbose < /dev/null \
   | tee "$LOG" \
-  | jq -rj 'select(.type=="assistant") | .message.content[]? | select(.type=="text") | .text + "\n"'
+  | jq --unbuffered -r 'select(.type=="assistant") | .message.content[]?
+      | if .type=="tool_use" then "  ▶ \(.name): \((.input.command // .input.description // .input.file_path // "") | tostring | .[0:160])"
+        elif .type=="text" then .text else empty end'
 
 echo "transcript: $LOG"

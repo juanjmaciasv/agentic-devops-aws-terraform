@@ -44,6 +44,8 @@ Runtime context (from agent/run.sh): `$REPO` (owner/name), `$AWS_PROFILE`,
    tfstate, or any credential in the zip.
 
 ## Hard rules
+- Delegate to sub-agents synchronously (foreground) and wait for their result; never
+  run two agents in parallel on the same files.
 - Never push directly to devel/stage/main; all changes go via PRs from feature/ or bugfix/.
 - Never weaken a check (skip tests, disable lint, loosen engine-strict) to go green.
 - Never run `terraform destroy`, delete repos, create IAM access keys, or print secrets.
