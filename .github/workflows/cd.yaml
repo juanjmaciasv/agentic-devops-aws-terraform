@@ -1,0 +1,105 @@
+name: CD Pipeline
+
+# PRs:            terraform fmt/validate/plan against the target environment
+# push devel/stage (i.e. a merged PR): build image -> push to ECR -> apply -> verify
+on:
+  pull_request:
+    branches: [devel, stage]
+    paths: ['terraform/**', 'Dockerfile', 'nginx.conf', 'src/**', 'public/**', 'package*.json', '.github/workflows/cd.yaml', 'scripts/**']
+  push:
+    branches: [devel, stage]
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [devel, stage]
+        default: devel
+
+permissions:
+  contents: read
+  id-token: write # GitHub OIDC -> AWS, no static keys
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  TF_IN_AUTOMATION: 'true'
+  TF_VERSION: '1.16.1'
+
+jobs:
+  plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: terraform } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - name: terraform fmt
+        run: terraform fmt -check -recursive
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: terraform init
+        run: terraform init -input=false -backend-config=envs/${{ github.base_ref }}.backend.hcl
+      - name: terraform validate
+        run: terraform validate
+      - name: terraform plan
+        run: >
+          terraform plan -input=false -lock=false
+          -var-file=envs/${{ github.base_ref }}.tfvars
+          -var container_image=${{ vars.ECR_REPOSITORY_URL }}:${{ github.event.pull_request.head.sha }}
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || github.ref_name }}
+    concurrency:
+      group: deploy-${{ inputs.environment || github.ref_name }}
+      cancel-in-progress: false
+    env:
+      ENVIRONMENT: ${{ inputs.environment || github.ref_name }}
+      IMAGE: ${{ vars.ECR_REPOSITORY_URL }}:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image (immutable tag = commit SHA)
+        run: |
+          REPO=${IMAGE%%:*}; TAG=${IMAGE##*:}
+          if aws ecr describe-images --repository-name "${REPO##*/}" --image-ids imageTag="$TAG" >/dev/null 2>&1; then
+            echo "Image $IMAGE already exists, skipping build"
+          else
+            docker build --build-arg REACT_APP_API_URL="${{ vars.REACT_APP_API_URL || 'http://localhost:8080' }}" -t "$IMAGE" .
+            docker push "$IMAGE"
+          fi
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform apply
+        working-directory: terraform
+        run: |
+          terraform init -input=false -backend-config=envs/$ENVIRONMENT.backend.hcl
+          terraform apply -input=false -auto-approve -var-file=envs/$ENVIRONMENT.tfvars -var container_image=$IMAGE
+          {
+            echo "CLUSTER=$(terraform output -raw cluster_name)"
+            echo "SERVICE=$(terraform output -raw service_name)"
+            echo "TG_ARN=$(terraform output -raw target_group_arn)"
+            echo "ALB_DNS=$(terraform output -raw alb_dns_name)"
+          } >> "$GITHUB_ENV"
+
+      - name: Verify deployment (stable service, healthy targets, HTTP 200)
+        run: scripts/verify-deploy.sh "$CLUSTER" "$SERVICE" "$TG_ARN" "$ALB_DNS" 20
+
+      - name: Summary
+        run: echo "### Deployed $ENVIRONMENT -> http://$ALB_DNS" >> "$GITHUB_STEP_SUMMARY"
