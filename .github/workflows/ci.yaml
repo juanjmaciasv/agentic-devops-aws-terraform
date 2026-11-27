@@ -11,49 +11,89 @@ on:
       - 'feature/**'
       - 'bugfix/**'
 
+# Least privilege for the GITHUB_TOKEN
+permissions:
+  contents: read
+
+# Cancel superseded runs for the same branch / PR
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Enforces the branching strategy:
+  #   * PRs into devel must come from feature/* or bugfix/*
+  #   * PRs into stage must come from devel only
+  branch-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate source branch
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.head_ref || github.ref_name }}
+        run: |
+          echo "event=$EVENT base=$BASE head=$HEAD"
+          if [ "$EVENT" != "pull_request" ]; then
+            case "$HEAD" in feature/*|bugfix/*) exit 0 ;; esac
+            echo "::error::Pushes are only built for feature/* or bugfix/* branches"; exit 1
+          fi
+          case "$BASE" in
+            devel)
+              case "$HEAD" in feature/*|bugfix/*) exit 0 ;; esac
+              echo "::error::Only feature/* or bugfix/* branches may merge into devel (got '$HEAD')"; exit 1 ;;
+            stage)
+              [ "$HEAD" = "devel" ] && exit 0
+              echo "::error::Only devel may merge into stage (got '$HEAD')"; exit 1 ;;
+            main)
+              [ "$HEAD" = "stage" ] && exit 0
+              echo "::error::Only stage may merge into main (got '$HEAD')"; exit 1 ;;
+          esac
+
   install:
+    needs: [branch-policy]
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '14'
+          node-version-file: '.nvmrc'
 
       - name: Install dependencies
         run: npm install
 
       - name: Cache node_modules
-        uses: actions/cache/save@v3
+        uses: actions/cache/save@v4
         with:
           path: node_modules
-          key: node-modules-${{ hashFiles('package-lock.json') }}
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ github.run_id }}
 
   lint:
     needs: [install]
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '14'
+          node-version-file: '.nvmrc'
 
       - name: Restore node_modules
-        uses: actions/cache/restore@v3
+        uses: actions/cache/restore@v4
         with:
           path: node_modules
-          key: node-modules-${{ hashFiles('package-lock.json') }}
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ github.run_id }}
+          fail-on-cache-miss: true
 
       - name: Run linter
         run: npm run lint
 
-      - name: Run formatter
+      - name: Run formatter check
         run: npm run prettier
 
   test:
@@ -61,18 +101,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '14'
+          node-version-file: '.nvmrc'
 
       - name: Restore node_modules
-        uses: actions/cache/restore@v3
+        uses: actions/cache/restore@v4
         with:
           path: node_modules
-          key: node-modules-${{ hashFiles('package-lock.json') }}
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ github.run_id }}
+          fail-on-cache-miss: true
 
       - name: Run tests
         env:
@@ -80,22 +121,23 @@ jobs:
         run: npm run test
 
   build:
-    needs: [lint]
+    needs: [lint, test]
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '14'
+          node-version-file: '.nvmrc'
 
       - name: Restore node_modules
-        uses: actions/cache/restore@v3
+        uses: actions/cache/restore@v4
         with:
           path: node_modules
-          key: deps-${{ hashFiles('package-lock.json') }}
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ github.run_id }}
+          fail-on-cache-miss: true
 
       - name: Build project
         run: npm run build
