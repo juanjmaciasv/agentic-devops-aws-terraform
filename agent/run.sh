@@ -23,6 +23,15 @@ export AWS_REGION=${AWS_REGION:-us-east-1}
 for t in claude gh git terraform aws node npm curl; do
   command -v "$t" >/dev/null || { echo "missing tool: $t"; exit 1; }
 done
+# Pin Node to .nvmrc (package.json engines + engine-strict reject other versions)
+NODE_V=$(cat .nvmrc)
+if [ "$(node -v 2>/dev/null)" != "v$NODE_V" ]; then
+  NODE_DIR=${XDG_CACHE_HOME:-$HOME/.cache}/rdicidr-node/node-v$NODE_V-linux-x64
+  [ -x "$NODE_DIR/bin/node" ] || { mkdir -p "${NODE_DIR%/*}"; \
+    curl -fsSL "https://nodejs.org/dist/v$NODE_V/node-v$NODE_V-linux-x64.tar.xz" | tar xJ -C "${NODE_DIR%/*}"; }
+  export PATH="$NODE_DIR/bin:$PATH"
+fi
+echo "node $(node -v) / npm $(npm -v)"
 gh auth status >/dev/null 2>&1 || { echo "gh not authenticated: gh auth login -s workflow"; exit 1; }
 gh auth status 2>&1 | grep -q workflow || echo "warning: gh token may lack 'workflow' scope"
 # Short-lived creds exported to this process only (works with `aws login` sessions,
