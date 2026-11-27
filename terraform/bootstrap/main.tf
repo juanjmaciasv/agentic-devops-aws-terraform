@@ -28,6 +28,16 @@ variable "github_repo" {
   default     = "juanjmaciasv/agentic-devops-aws-terraform"
 }
 
+# The repo uses GitHub's immutable OIDC subject format
+# (GET repos/<repo>/actions/oidc/customization/sub -> use_immutable_subject=true),
+# so tokens carry `repo:<owner>@<owner_id>/<repo>@<repo_id>:...` instead of
+# `repo:<owner>/<repo>:...`. Both prefixes are trusted for the same scopes.
+variable "github_repo_immutable_sub_prefix" {
+  type        = string
+  description = "sub_claim_prefix reported by GitHub for this repo (immutable owner/repo IDs)"
+  default     = "repo:juanjmaciasv@60014074/agentic-devops-aws-terraform@1474796147"
+}
+
 provider "aws" {
   region = var.aws_region
   default_tags {
@@ -40,6 +50,17 @@ data "aws_caller_identity" "current" {}
 locals {
   account_id   = data.aws_caller_identity.current.account_id
   state_bucket = "${var.app_name}-tfstate-${local.account_id}"
+
+  # deploy jobs run in GitHub environments (sub ends in environment:<name>);
+  # PR plan jobs end in pull_request
+  oidc_sub_prefixes = ["repo:${var.github_repo}", var.github_repo_immutable_sub_prefix]
+  oidc_subjects = flatten([
+    for p in local.oidc_sub_prefixes : [
+      "${p}:environment:devel",
+      "${p}:environment:stage",
+      "${p}:pull_request",
+    ]
+  ])
 }
 
 # --- Remote state (S3 native locking, TF >= 1.10) ---
@@ -126,13 +147,7 @@ resource "aws_iam_role" "github_deploy" {
         StringEquals = { "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com" }
         # Only protected branches (deploy) and PRs (plan) of this repo
         StringLike = {
-          "token.actions.githubusercontent.com:sub" = [
-            # deploy jobs run in GitHub environments -> sub is environment:<name>
-            "repo:${var.github_repo}:environment:devel",
-            "repo:${var.github_repo}:environment:stage",
-            # PR plan jobs
-            "repo:${var.github_repo}:pull_request",
-          ]
+          "token.actions.githubusercontent.com:sub" = local.oidc_subjects
         }
       }
     }]
